@@ -1,14 +1,11 @@
-name: Terraform Apply Workflow
+name: Terraform Apply
 
 # This workflow can be triggered manually via the GitHub Actions UI
 on:
-    pull_request:
-      types:
-        - closed
-      branches:
-        - main
+  workflow_dispatch:
+
 jobs:
-  terraform-apply:
+  terraform-plan:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
@@ -35,5 +32,5 @@ jobs:
     - name: Terraform Validate
       run: terraform validate
 
-    - name: Terraform Apply
-      run: terraform apply  --auto-approve
+    - name: Terraform Plan
+      run: terraform plan -var-file=secret.tfvars
