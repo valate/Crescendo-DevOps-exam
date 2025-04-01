@@ -1,6 +1,4 @@
-provider "aws" {
-  region = "ap-southeast-1"  
-}
+
 
 # VPC
 resource "aws_vpc" "main" {
