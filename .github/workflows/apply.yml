@@ -1,0 +1,43 @@
+name: Terraform Apply Workflow
+
+# This workflow can be triggered manually via the GitHub Actions UI
+on:
+    pull_request:
+      types:
+        - closed
+      branches:
+        - main
+jobs:
+  terraform-apply:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.8.0  # Specify the Terraform version to install
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-west-2
+
+    - name: Create tfvars file from secret
+      run: |
+        aws secretsmanager get-secret-value --secret-id ${{ secrets.SECRET_ARN }} --query SecretString --output text > secret.tfvars
+
+    - name: Terraform Init
+      run: terraform init
+
+    - name: Terraform Fmt
+      run: terraform fmt
+
+    - name: Terraform Validate
+      run: terraform validate
+
+    - name: Terraform Apply
+      run: terraform apply -var-file=secret.tfvars --auto-approve
