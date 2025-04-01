@@ -185,7 +185,7 @@ resource "aws_instance" "web1" {
 
 
 resource "aws_instance" "web2" {
-  ami           = "ami-0c55b159cbfafe1f0"
+  ami           = "ami-01938df366ac2d954"
   instance_type = "t2.micro"
   subnet_id     = aws_subnet.private2.id
   security_groups = [aws_security_group.ec2.id]
@@ -347,16 +347,14 @@ resource "aws_db_subnet_group" "private" {
 resource "aws_db_instance" "postgres" {
   allocated_storage      = 20
   engine                 = "postgres"
-  engine_version         = "13.4"
-  instance_class         = "db.t3.micro"  
+  engine_version         = "13.15"  # Updated to a supported version
+  instance_class         = "db.t3.micro"
   identifier             = "crescendo-db"
   username               = "postgres"
-  password               = "rdspasstest"  
+  password               = "yourpassword"
   db_subnet_group_name   = aws_db_subnet_group.private.name
   vpc_security_group_ids = [aws_security_group.rds.id]
-  publicly_accessible    = false  
-  skip_final_snapshot    = true   
-  tags = {
-    Name = "crescendo-postgres"
-  }
+  publicly_accessible    = false
+  skip_final_snapshot    = true
+  tags = { Name = "crescendo-postgres" }
 }
