@@ -44,7 +44,7 @@ resource "aws_subnet" "private2" {
 
 # NAT Gateway (in public subnet 1)
 resource "aws_eip" "nat" {
- # domain = "vpc"
+domain = "vpc"
 }
 
 resource "aws_nat_gateway" "nat" {
