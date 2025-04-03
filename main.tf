@@ -1,18 +1,14 @@
-
-
-# VPC
+# VPC and Networking (unchanged)
 resource "aws_vpc" "main" {
   cidr_block = "10.0.0.0/16"
   tags = { Name = "crescendo-exam-vpc" }
 }
 
-# Internet Gateway
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.main.id
   tags = { Name = "crescendo-igw" }
 }
 
-# Public Subnets
 resource "aws_subnet" "public1" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.1.0/24"
@@ -27,7 +23,6 @@ resource "aws_subnet" "public2" {
   tags = { Name = "public-subnet-2" }
 }
 
-# Private Subnets
 resource "aws_subnet" "private1" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.3.0/24"
@@ -42,9 +37,8 @@ resource "aws_subnet" "private2" {
   tags = { Name = "private-subnet-2" }
 }
 
-# NAT Gateway (in public subnet 1)
 resource "aws_eip" "nat" {
-domain = "vpc"
+  domain = "vpc"
 }
 
 resource "aws_nat_gateway" "nat" {
@@ -53,7 +47,6 @@ resource "aws_nat_gateway" "nat" {
   tags = { Name = "crescendo-nat" }
 }
 
-# Route Tables
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
   route {
@@ -92,7 +85,7 @@ resource "aws_route_table_association" "private2" {
   route_table_id = aws_route_table.private.id
 }
 
-# Security Groups
+# Security Groups (unchanged)
 resource "aws_security_group" "alb" {
   name        = "alb-sg"
   description = "Security group for ALB"
@@ -129,60 +122,82 @@ resource "aws_security_group" "ec2" {
   }
 }
 
-# EC2 Instance with Nginx and Tomcat on Ubuntu 24.04
+# EC2 Instances with inline Magnolia CMS installation
 resource "aws_instance" "web1" {
-  ami           = "ami-01938df366ac2d954"  
+  ami           = "ami-01938df366ac2d954"
   instance_type = "t2.micro"
   subnet_id     = aws_subnet.private1.id
   security_groups = [aws_security_group.ec2.id]
- user_data = <<-EOF
-                #!/bin/bash
-                # Update and install Nginx
-                apt-get update -y
-                apt-get install -y nginx
-                systemctl start nginx
-                systemctl enable nginx
+  user_data = <<-EOF
+              #!/bin/bash
+              # Update and install Nginx
+              apt-get update -y
+              apt-get install -y nginx
+              systemctl start nginx
+              systemctl enable nginx
 
-                # Install Java for Tomcat
-                apt-get install -y default-jdk
+              # Install Java
+              apt-get install -y default-jdk
 
-                # Download and Install Tomcat
-                wget https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.58/bin/apache-tomcat-9.0.58.tar.gz -P /tmp
-                tar -xvf /tmp/apache-tomcat-9.0.58.tar.gz -C /opt
-                mv /opt/apache-tomcat-9.0.58 /opt/tomcat
+              # Install Tomcat
+              wget https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.58/bin/apache-tomcat-9.0.58.tar.gz -P /tmp
+              tar -xvf /tmp/apache-tomcat-9.0.58.tar.gz -C /opt
+              mv /opt/apache-tomcat-9.0.58 /opt/tomcat
 
-                # Start Tomcat
-                /opt/tomcat/bin/startup.sh
+              # Install Magnolia CMS
+              wget https://repo.magnolia-cms.com/nexus/service/local/repositories/public/content/com/magnolia/cli/magnolia-cli/5.7.6/magnolia-cli-5.7.6.jar -O /tmp/magnolia-cli.jar
+              java -jar /tmp/magnolia-cli.jar install --non-interactive --webapps-dir /opt/tomcat/webapps --name magnolia
 
+              # Configure PostgreSQL Driver
+              wget https://jdbc.postgresql.org/download/postgresql-42.7.3.jar -O /opt/tomcat/lib/postgresql.jar
 
-                # Enable Tomcat on reboot
-                cat <<'EOF2' > /etc/systemd/system/tomcat.service
-                [Unit]
-                Description=Apache Tomcat Web Application Container
-                After=network.target
+              # Configure JNDI Datasource
+              mkdir -p /opt/tomcat/conf/Catalina/localhost
+              cat <<'EOF_DS' > /opt/tomcat/conf/Catalina/localhost/magnolia.xml
+              <Context>
+                <Resource name="jdbc/magnolia"
+                          auth="Container"
+                          type="javax.sql.DataSource"
+                          driverClassName="org.postgresql.Driver"
+                          url="jdbc:postgresql://${aws_db_instance.postgres.endpoint}/magnolia"
+                          username="postgres"
+                          password="mypassword2025"
+                          maxTotal="20"
+                          maxIdle="10"
+                          maxWaitMillis="-1"/>
+              </Context>
+              EOF_DS
 
-                [Service]
-                Type=forking
+              # Configure Magnolia Properties
+              echo "magnolia.repositories.jcr.config=classpath:/jackrabbit-bundle-postgres-search.xml" >> /opt/tomcat/webapps/magnolia/WEB-INF/config/default/magnolia.properties
+              echo "magnolia.repositories.jcr.url=jndi:jdbc/magnolia" >> /opt/tomcat/webapps/magnolia/WEB-INF/config/default/magnolia.properties
 
-                ExecStart=/opt/tomcat/bin/startup.sh
-                ExecStop=/opt/tomcat/bin/shutdown.sh
+              # Tomcat Service Configuration
+              cat <<'EOF_TC' > /etc/systemd/system/tomcat.service
+              [Unit]
+              Description=Apache Tomcat Web Application Container
+              After=network.target
 
-                User=root
-                Group=root
+              [Service]
+              Type=forking
+              ExecStart=/opt/tomcat/bin/startup.sh
+              ExecStop=/opt/tomcat/bin/shutdown.sh
+              User=root
+              Group=root
 
-                [Install]
-                WantedBy=multi-user.target
-                EOF2
+              [Install]
+              WantedBy=multi-user.target
+              EOF_TC
 
-                systemctl daemon-reload
-                systemctl enable tomcat
-                systemctl start tomcat
+              # Start Services
+              chown -R tomcat:tomcat /opt/tomcat/
+              systemctl daemon-reload
+              systemctl enable tomcat
+              systemctl start tomcat
               EOF
 
   tags = { Name = "web1" }
 }
-
-
 
 resource "aws_instance" "web2" {
   ami           = "ami-01938df366ac2d954"
@@ -190,52 +205,77 @@ resource "aws_instance" "web2" {
   subnet_id     = aws_subnet.private2.id
   security_groups = [aws_security_group.ec2.id]
   user_data = <<-EOF
-                #!/bin/bash
-                # Update and install Nginx
-                apt-get update -y
-                apt-get install -y nginx
-                systemctl start nginx
-                systemctl enable nginx
+              #!/bin/bash
+              # Update and install Nginx
+              apt-get update -y
+              apt-get install -y nginx
+              systemctl start nginx
+              systemctl enable nginx
 
-                # Install Java for Tomcat
-                apt-get install -y default-jdk
+              # Install Java
+              apt-get install -y default-jdk
 
-                # Download and Install Tomcat
-                wget https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.58/bin/apache-tomcat-9.0.58.tar.gz -P /tmp
-                tar -xvf /tmp/apache-tomcat-9.0.58.tar.gz -C /opt
-                mv /opt/apache-tomcat-9.0.58 /opt/tomcat
+              # Install Tomcat
+              wget https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.58/bin/apache-tomcat-9.0.58.tar.gz -P /tmp
+              tar -xvf /tmp/apache-tomcat-9.0.58.tar.gz -C /opt
+              mv /opt/apache-tomcat-9.0.58 /opt/tomcat
 
-                # Start Tomcat
-                /opt/tomcat/bin/startup.sh
+              # Install Magnolia CMS
+              wget https://repo.magnolia-cms.com/nexus/service/local/repositories/public/content/com/magnolia/cli/magnolia-cli/5.7.6/magnolia-cli-5.7.6.jar -O /tmp/magnolia-cli.jar
+              java -jar /tmp/magnolia-cli.jar install --non-interactive --webapps-dir /opt/tomcat/webapps --name magnolia
 
+              # Configure PostgreSQL Driver
+              wget https://jdbc.postgresql.org/download/postgresql-42.7.3.jar -O /opt/tomcat/lib/postgresql.jar
 
-                # Enable Tomcat on reboot
-                cat <<'EOF2' > /etc/systemd/system/tomcat.service
-                [Unit]
-                Description=Apache Tomcat Web Application Container
-                After=network.target
+              # Configure JNDI Datasource
+              mkdir -p /opt/tomcat/conf/Catalina/localhost
+              cat <<'EOF_DS' > /opt/tomcat/conf/Catalina/localhost/magnolia.xml
+              <Context>
+                <Resource name="jdbc/magnolia"
+                          auth="Container"
+                          type="javax.sql.DataSource"
+                          driverClassName="org.postgresql.Driver"
+                          url="jdbc:postgresql://${aws_db_instance.postgres.endpoint}/magnolia"
+                          username="postgres"
+                          password="mypassword2025"
+                          maxTotal="20"
+                          maxIdle="10"
+                          maxWaitMillis="-1"/>
+              </Context>
+              EOF_DS
 
-                [Service]
-                Type=forking
+              # Configure Magnolia Properties
+              echo "magnolia.repositories.jcr.config=classpath:/jackrabbit-bundle-postgres-search.xml" >> /opt/tomcat/webapps/magnolia/WEB-INF/config/default/magnolia.properties
+              echo "magnolia.repositories.jcr.url=jndi:jdbc/magnolia" >> /opt/tomcat/webapps/magnolia/WEB-INF/config/default/magnolia.properties
 
-                ExecStart=/opt/tomcat/bin/startup.sh
-                ExecStop=/opt/tomcat/bin/shutdown.sh
+              # Tomcat Service Configuration
+              cat <<'EOF_TC' > /etc/systemd/system/tomcat.service
+              [Unit]
+              Description=Apache Tomcat Web Application Container
+              After=network.target
 
-                User=root
-                Group=root
+              [Service]
+              Type=forking
+              ExecStart=/opt/tomcat/bin/startup.sh
+              ExecStop=/opt/tomcat/bin/shutdown.sh
+              User=root
+              Group=root
 
-                [Install]
-                WantedBy=multi-user.target
-                EOF2
+              [Install]
+              WantedBy=multi-user.target
+              EOF_TC
 
-                systemctl daemon-reload
-                systemctl enable tomcat
-                systemctl start tomcat
+              # Start Services
+              chown -R tomcat:tomcat /opt/tomcat/
+              systemctl daemon-reload
+              systemctl enable tomcat
+              systemctl start tomcat
               EOF
+
   tags = { Name = "web2" }
 }
 
-# Application Load Balancer
+# ALB and Target Group (unchanged)
 resource "aws_lb_target_group" "web" {
   name     = "web-tg"
   port     = 80
@@ -274,7 +314,7 @@ resource "aws_lb_listener" "web" {
   }
 }
 
-# CloudFront Distribution
+# CloudFront (unchanged)
 resource "aws_cloudfront_distribution" "cdn" {
   origin {
     domain_name = aws_lb.web.dns_name
@@ -309,17 +349,17 @@ resource "aws_cloudfront_distribution" "cdn" {
   tags = { Name = "crescendo-cdn" }
 }
 
-# Security Group for RDS
+# RDS Security Group and Instance (updated with database name)
 resource "aws_security_group" "rds" {
   name        = "rds-sg"
   description = "Security group for RDS PostgreSQL"
-  vpc_id      = aws_vpc.main.id  
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [aws_security_group.ec2.id] 
+    security_groups = [aws_security_group.ec2.id]
   }
 
   egress {
@@ -329,29 +369,24 @@ resource "aws_security_group" "rds" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "rds-sg"
-  }
+  tags = { Name = "rds-sg" }
 }
 
-# RDS Subnet Group
 resource "aws_db_subnet_group" "private" {
   name       = "private-subnet-group"
-  subnet_ids = [aws_subnet.private1.id, aws_subnet.private2.id]  
-  tags = {
-    Name = "private-subnet-group"
-  }
+  subnet_ids = [aws_subnet.private1.id, aws_subnet.private2.id]
+  tags = { Name = "private-subnet-group" }
 }
 
-# RDS PostgreSQL Instance
 resource "aws_db_instance" "postgres" {
   allocated_storage      = 20
   engine                 = "postgres"
-  engine_version         = "13.15"  # Updated to a supported version
+  engine_version         = "13.15"
   instance_class         = "db.t3.micro"
   identifier             = "crescendo-db"
+  db_name                = "magnolia"  # Database name added
   username               = "postgres"
-  password               = "yourpassword"
+  password               = "mypassword2025"
   db_subnet_group_name   = aws_db_subnet_group.private.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
